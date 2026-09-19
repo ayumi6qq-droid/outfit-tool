@@ -1,19 +1,14 @@
-const CACHE_NAME = 'outfit-tool-offline-v12';
+const CACHE_NAME = 'outfit-tool-v13-20260919';
 const APP_SHELL = [
   './',
   './index.html',
-  './manifest.webmanifest',
-  './icons/icon-192.png',
-  './icons/icon-512.png',
-  './icons/icon-512-maskable.png',
-  './icons/apple-touch-icon.png'
+  './manifest.webmanifest'
 ];
 
 self.addEventListener('install', event => {
+  self.skipWaiting();
   event.waitUntil(
-    caches.open(CACHE_NAME)
-      .then(cache => cache.addAll(APP_SHELL))
-      .then(() => self.skipWaiting())
+    caches.open(CACHE_NAME).then(cache => cache.addAll(APP_SHELL))
   );
 });
 
@@ -26,23 +21,36 @@ self.addEventListener('activate', event => {
 });
 
 self.addEventListener('fetch', event => {
-  if (event.request.method !== 'GET') return;
+  const req = event.request;
+  if (req.method !== 'GET') return;
 
-  const url = new URL(event.request.url);
+  const url = new URL(req.url);
   if (url.origin !== self.location.origin) return;
 
-  if (event.request.mode === 'navigate') {
+  // Navigations: always try the newest index first; cached copy is offline fallback only.
+  if (req.mode === 'navigate') {
     event.respondWith(
-      caches.match('./index.html').then(cached => cached || fetch(event.request))
+      fetch(req, { cache: 'no-store' })
+        .then(response => {
+          const copy = response.clone();
+          caches.open(CACHE_NAME).then(cache => cache.put('./index.html', copy));
+          return response;
+        })
+        .catch(() => caches.match('./index.html').then(r => r || caches.match('./')))
     );
     return;
   }
 
+  // Other same-origin files: network first, cache as offline fallback.
   event.respondWith(
-    caches.match(event.request).then(cached => cached || fetch(event.request).then(response => {
-      const copy = response.clone();
-      caches.open(CACHE_NAME).then(cache => cache.put(event.request, copy));
-      return response;
-    }))
+    fetch(req, { cache: 'no-store' })
+      .then(response => {
+        if (response && response.ok) {
+          const copy = response.clone();
+          caches.open(CACHE_NAME).then(cache => cache.put(req, copy));
+        }
+        return response;
+      })
+      .catch(() => caches.match(req))
   );
 });
